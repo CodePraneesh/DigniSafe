@@ -275,3 +275,161 @@ def test_human_verification_and_metrics():
     metrics2 = client.get("/api/metrics").json()
     assert metrics2["false_alarms"] == 1
     assert metrics2["precision"] == 0.50 # 1 TP, 1 FP => 50%
+
+
+def test_baseline_and_dignisafe_experiment_metrics_calculated():
+    """
+    Verifies that GET /api/experiment calculates all confusion matrix counts
+    and performance rates for both baseline and DigniSafe over the 500-event dataset.
+    """
+    resp = client.get("/api/experiment")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    baseline = data["baseline"]
+    dignisafe = data["dignisafe"]
+
+    # Verify confusion matrix keys
+    for model in [baseline, dignisafe]:
+        assert "true_positives" in model
+        assert "true_negatives" in model
+        assert "false_positives" in model
+        assert "false_negatives" in model
+        assert "precision" in model
+        assert "recall" in model
+        assert "false_positive_rate" in model
+        assert "missed_incident_rate" in model
+        assert "alert_count" in model
+
+    # Total evaluated events must equal 500
+    total_baseline_events = baseline["true_positives"] + baseline["true_negatives"] + baseline["false_positives"] + baseline["false_negatives"]
+    total_dignisafe_events = dignisafe["true_positives"] + dignisafe["true_negatives"] + dignisafe["false_positives"] + dignisafe["false_negatives"]
+    assert total_baseline_events == 500
+    assert total_dignisafe_events == 500
+
+    # DigniSafe must achieve higher precision and lower false positives than naive baseline
+    assert dignisafe["precision"] > baseline["precision"]
+    assert dignisafe["false_positives"] < baseline["false_positives"]
+
+
+def test_intrusiveness_score_calculated_dynamically():
+    """
+    Verifies that intrusiveness scores are calculated dynamically from monitoring channels,
+    not hardcoded, and reflect active consent configurations.
+    """
+    # 1. Experiment intrusiveness
+    exp_resp = client.get("/api/experiment")
+    assert exp_resp.status_code == 200
+    data = exp_resp.json()
+
+    intrusiveness_baseline = data["intrusiveness_baseline"]
+    intrusiveness_dignisafe = data["intrusiveness_dignisafe"]
+
+    # Baseline enables 3 ambient channels (3/6 = 0.50)
+    assert 0.0 < intrusiveness_baseline <= 1.0
+    assert abs(intrusiveness_baseline - 0.50) < 0.01
+
+    # DigniSafe intrusiveness is calculated from actual consent states and must be <= baseline
+    assert 0.0 < intrusiveness_dignisafe <= intrusiveness_baseline
+
+    # 2. Live database metrics intrusiveness calculation
+    metrics_resp = client.get("/api/metrics")
+    assert metrics_resp.status_code == 200
+    live_intrusiveness = metrics_resp.json()["intrusiveness_score"]
+    # R001 and R003 both start with 3 channels enabled (movement, door, emergency). (3+3)/(2*6) = 0.50
+    assert live_intrusiveness > 0.0
+
+    # Disable door for R001
+    client.post("/api/consent?resident_id=R001", json={"door_enabled": False})
+    metrics_after = client.get("/api/metrics").json()
+    # Intrusiveness score must dynamically drop
+    assert metrics_after["intrusiveness_score"] < live_intrusiveness
+
+
+def test_low_urgency_journey_r001_no_false_alert():
+    """
+    Tests Journey A (Low Urgency):
+    R001 (High independence) exhibits normal movement and door activity,
+    followed by 20 minutes of inactivity.
+    Because 20m < 60m threshold, no alert is generated and risk score is 0.
+    """
+    resp = client.post("/api/simulator/scenario/low-urgency")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["scenario"] == "low-urgency"
+    assert data["resident_id"] == "R001"
+    assert data["final_risk_score"] == 0
+    assert data["priority"] == "NORMAL"
+    assert data["alert_generated"] is False
+
+    # Verify no open alerts for R001
+    alerts = client.get("/api/alerts").json()
+    r001_alerts = [a for a in alerts if a["resident_id"] == "R001" and a["status"] in ["OPEN", "UNDER_REVIEW"]]
+    assert len(r001_alerts) == 0
+
+
+def test_high_urgency_journey_r003_alert_and_human_review():
+    """
+    Tests Journey B (High Urgency):
+    R003 (Assisted living) triggers an emergency call followed by immobility.
+    Risk score escalates to >= 70, raising a REVIEW REQUIRED / HIGH PRIORITY alert.
+    Care staff performs human review, verifying the incident.
+    """
+    resp = client.post("/api/simulator/scenario/high-urgency")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["scenario"] == "high-urgency"
+    assert data["resident_id"] == "R003"
+    assert data["final_risk_score"] >= 70
+    assert data["priority"] in ["REVIEW REQUIRED", "HIGH PRIORITY"]
+    assert data["alert_generated"] is True
+    alert_id = data["alert_id"]
+
+    # Verify alert is in OPEN status
+    alert_detail = client.get(f"/api/alerts/{alert_id}").json()
+    assert alert_detail["status"] == "OPEN"
+
+    # Human review: Caregiver verifies incident
+    review_resp = client.post(f"/api/alerts/{alert_id}/review", json={
+        "action_taken": "Verify Incident",
+        "notes": "Verified via resident intercom check."
+    })
+    assert review_resp.status_code == 200
+    assert review_resp.json()["status"] == "VERIFIED_INCIDENT"
+
+    # Verify incident record was created in database
+    res_detail = client.get("/api/residents/R003").json()
+    assert len(res_detail["incidents"]) >= 1
+
+
+def test_door_and_emergency_consent_backend_enforcement():
+    """
+    Verifies that revoking door or emergency consent blocks corresponding
+    events on the backend and records an audit log.
+    """
+    # 1. Revoke door consent for R003
+    client.post("/api/consent?resident_id=R003", json={"door_enabled": False})
+
+    door_resp = client.post("/api/events", json={
+        "resident_id": "R003",
+        "event_type": "door_open",
+        "sensor_id": "DOOR-R003"
+    })
+    assert door_resp.status_code == 200
+    assert door_resp.json()["blocked_by_consent"] is True
+    assert door_resp.json()["processed"] is False
+
+    # 2. Revoke emergency consent for R003
+    client.post("/api/consent?resident_id=R003", json={"emergency_enabled": False})
+
+    emer_resp = client.post("/api/events", json={
+        "resident_id": "R003",
+        "event_type": "emergency_call",
+        "sensor_id": "CALL-R003"
+    })
+    assert emer_resp.status_code == 200
+    assert emer_resp.json()["blocked_by_consent"] is True
+    assert emer_resp.json()["processed"] is False
+

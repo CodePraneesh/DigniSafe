@@ -318,5 +318,12 @@ export const api = {
     const res = await fetch("/api/errors");
     if (!res.ok) throw new Error("Failed to fetch error analysis data");
     return res.json();
+  },
+
+  async runScenario(id: 'low-urgency' | 'high-urgency'): Promise<any> {
+    const res = await fetch(`/api/simulator/scenario/${id}`, { method: "POST" });
+    if (!res.ok) throw new Error(`Failed to run scenario ${id}`);
+    return res.json();
   }
 };
+

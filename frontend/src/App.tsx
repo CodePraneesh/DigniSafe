@@ -166,6 +166,23 @@ export default function App() {
     }
   };
 
+  // Pre-configured Demonstration Scenarios
+  const handleRunScenario = async (id: 'low-urgency' | 'high-urgency') => {
+    try {
+      setSimLog(prev => [`[${new Date().toLocaleTimeString()}] Executing ${id} preset scenario...`, ...prev]);
+      const result = await api.runScenario(id);
+      setSimLog(prev => [`↳ ${result.summary}`, ...prev]);
+      if (id === 'low-urgency') {
+        showToast("Low Urgency Journey: Normal movement, 0 risk score, no alert generated.", "success");
+      } else {
+        showToast(`High Urgency Journey: Emergency alert #${result.alert_id} generated! Go to Alerts tab to perform human review.`, "error");
+      }
+      fetchData();
+    } catch (e) {
+      showToast("Failed to run scenario", "error");
+    }
+  };
+
   // Reset database helper
   const handleResetSimulator = async () => {
     if (window.confirm("Reset all logs, metrics, alerts, and database state to default?")) {
@@ -927,9 +944,40 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Pre-Configured Demonstration Journeys (Review 1 Deliverable) */}
+                  <div className="bg-gradient-to-r from-cyan-950 via-slate-900 to-cyan-950 text-white border border-cyan-800 rounded-xl p-5 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-bold text-cyan-200 text-sm">2. Pre-Configured Demonstration Journeys (Review 1)</h3>
+                      <span className="bg-cyan-500 bg-opacity-20 text-cyan-300 text-[10px] font-bold px-2 py-0.5 rounded border border-cyan-500 border-opacity-30">1-Click Reproducible</span>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <button
+                        onClick={() => handleRunScenario('low-urgency')}
+                        className="p-3.5 bg-slate-800 hover:bg-slate-750 border border-slate-700 hover:border-cyan-500 rounded-lg text-left transition-all group"
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-xs text-cyan-300 group-hover:text-cyan-200">Journey A: Low Urgency</span>
+                          <span className="text-[10px] font-semibold bg-emerald-950 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-800">R001 (High)</span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 leading-snug">Normal movement & door &rarr; 20m inactivity &rarr; <strong className="text-emerald-400">No Alert</strong> (Within 60m threshold)</p>
+                      </button>
+
+                      <button
+                        onClick={() => handleRunScenario('high-urgency')}
+                        className="p-3.5 bg-slate-800 hover:bg-slate-750 border border-slate-700 hover:border-rose-500 rounded-lg text-left transition-all group"
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-xs text-rose-300 group-hover:text-rose-200">Journey B: High Urgency</span>
+                          <span className="text-[10px] font-semibold bg-rose-950 text-rose-300 px-1.5 py-0.5 rounded border border-rose-800">R003 (Assisted)</span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 leading-snug">Emergency call &rarr; Immobility &rarr; <strong className="text-rose-400">Score 70+ Alert</strong> &rarr; Triage ready in Alerts Tab</p>
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Actions Grid */}
                   <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-5">
-                    <h3 className="font-bold text-slate-800 text-sm">2. Inject Simulated Observations</h3>
+                    <h3 className="font-bold text-slate-800 text-sm">3. Inject Individual Simulated Observations</h3>
                     
                     {/* Normal Events */}
                     <div className="space-y-2">
@@ -1058,40 +1106,64 @@ export default function App() {
                         </thead>
                         <tbody>
                           <tr className="border-b border-slate-100">
-                            <td className="p-4 font-bold text-slate-700">True Positives</td>
+                            <td className="p-4 font-bold text-slate-700">True Positives (TP)</td>
                             <td className="p-4 font-semibold text-slate-500">{experimentData.baseline.true_positives}</td>
                             <td className="p-4 font-bold text-emerald-800">{experimentData.dignisafe.true_positives}</td>
-                            <td className="p-4 text-emerald-600 font-semibold">Identifies fall profiles</td>
+                            <td className="p-4 text-emerald-600 font-semibold">Correctly identified genuine incidents</td>
                           </tr>
                           <tr className="border-b border-slate-100">
-                            <td className="p-4 font-bold text-slate-700">False Positives (Alarms)</td>
+                            <td className="p-4 font-bold text-slate-700">True Negatives (TN)</td>
+                            <td className="p-4 font-semibold text-slate-500">{experimentData.baseline.true_negatives}</td>
+                            <td className="p-4 font-bold text-emerald-800">{experimentData.dignisafe.true_negatives}</td>
+                            <td className="p-4 text-emerald-600 font-semibold">Correctly recognized normal routine</td>
+                          </tr>
+                          <tr className="border-b border-slate-100">
+                            <td className="p-4 font-bold text-slate-700">False Positives (FP - False Alarms)</td>
                             <td className="p-4 font-semibold text-slate-500">{experimentData.baseline.false_positives}</td>
                             <td className="p-4 font-bold text-emerald-800">{experimentData.dignisafe.false_positives}</td>
-                            <td className="p-4 text-emerald-600 font-semibold">Significantly reduces alert fatigue</td>
+                            <td className="p-4 text-emerald-600 font-semibold">Significantly reduces caregiver alert fatigue</td>
                           </tr>
                           <tr className="border-b border-slate-100">
-                            <td className="p-4 font-bold text-slate-700">Missed Incidents (FN)</td>
+                            <td className="p-4 font-bold text-slate-700">False Negatives (FN - Missed Incidents)</td>
                             <td className="p-4 font-semibold text-slate-500">{experimentData.baseline.false_negatives}</td>
                             <td className="p-4 font-bold text-emerald-800">{experimentData.dignisafe.false_negatives}</td>
-                            <td className="p-4 text-emerald-600 font-semibold">Mitigates safety risks</td>
+                            <td className="p-4 text-emerald-600 font-semibold">Minimizes critical safety risks</td>
                           </tr>
                           <tr className="border-b border-slate-100">
-                            <td className="p-4 font-bold text-slate-700">Precision Rate</td>
+                            <td className="p-4 font-bold text-slate-700">Precision [TP / (TP + FP)]</td>
                             <td className="p-4 font-semibold text-slate-500">{(experimentData.baseline.precision * 100).toFixed(1)}%</td>
                             <td className="p-4 font-bold text-cyan-900">{(experimentData.dignisafe.precision * 100).toFixed(1)}%</td>
-                            <td className="p-4 text-slate-600 font-medium">Reliable alerts for staff</td>
+                            <td className="p-4 text-slate-600 font-medium">Reliable alert actionable quality</td>
                           </tr>
                           <tr className="border-b border-slate-100">
-                            <td className="p-4 font-bold text-slate-700">Recall Rate</td>
+                            <td className="p-4 font-bold text-slate-700">Recall [TP / (TP + FN)]</td>
                             <td className="p-4 font-semibold text-slate-500">{(experimentData.baseline.recall * 100).toFixed(1)}%</td>
                             <td className="p-4 font-bold text-cyan-900">{(experimentData.dignisafe.recall * 100).toFixed(1)}%</td>
-                            <td className="p-4 text-slate-600 font-medium">Higher sensitivity matching</td>
+                            <td className="p-4 text-slate-600 font-medium">Sensitivity to true hazards</td>
+                          </tr>
+                          <tr className="border-b border-slate-100">
+                            <td className="p-4 font-bold text-slate-700">False-Positive Rate [FP / (FP + TN)]</td>
+                            <td className="p-4 font-semibold text-slate-500">{(experimentData.baseline.false_positive_rate * 100).toFixed(1)}%</td>
+                            <td className="p-4 font-bold text-emerald-800">{(experimentData.dignisafe.false_positive_rate * 100).toFixed(1)}%</td>
+                            <td className="p-4 text-emerald-600 font-semibold">Probability of spurious alarms</td>
+                          </tr>
+                          <tr className="border-b border-slate-100">
+                            <td className="p-4 font-bold text-slate-700">Missed Incident Rate [FN / Actual]</td>
+                            <td className="p-4 font-semibold text-slate-500">{(experimentData.baseline.missed_incident_rate * 100).toFixed(1)}%</td>
+                            <td className="p-4 font-bold text-emerald-800">{(experimentData.dignisafe.missed_incident_rate * 100).toFixed(1)}%</td>
+                            <td className="p-4 text-emerald-600 font-semibold">Uncaptured hazard proportion</td>
+                          </tr>
+                          <tr className="border-b border-slate-100">
+                            <td className="p-4 font-bold text-slate-700">Total Alerts Dispatched</td>
+                            <td className="p-4 font-semibold text-slate-500">{experimentData.baseline.alert_count}</td>
+                            <td className="p-4 font-bold text-cyan-900">{experimentData.dignisafe.alert_count}</td>
+                            <td className="p-4 text-slate-600 font-medium">Care staff interruption load</td>
                           </tr>
                           <tr>
-                            <td className="p-4 font-bold text-slate-700">Intrusiveness Index</td>
-                            <td className="p-4 font-semibold text-slate-500">{(experimentData.intrusiveness_baseline * 100).toFixed(0)}%</td>
-                            <td className="p-4 font-bold text-emerald-700">{(experimentData.intrusiveness_dignisafe * 100).toFixed(0)}%</td>
-                            <td className="p-4 text-emerald-600 font-bold">100% Dignity Protection</td>
+                            <td className="p-4 font-bold text-slate-700">Intrusiveness Index (Active Channels / 6)</td>
+                            <td className="p-4 font-semibold text-slate-500">{(experimentData.intrusiveness_baseline * 100).toFixed(1)}%</td>
+                            <td className="p-4 font-bold text-emerald-700">{(experimentData.intrusiveness_dignisafe * 100).toFixed(1)}%</td>
+                            <td className="p-4 text-emerald-600 font-bold">Privacy preservation via consent</td>
                           </tr>
                         </tbody>
                       </table>

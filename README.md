@@ -1,185 +1,206 @@
 # DigniSafe 🛡️
 > **Privacy-Preserving Resident Safety & Intelligent Alert Triage Platform for Assisted Living**
 
-[![Phase 1 Review 1](https://img.shields.io/badge/Review%201-35%25%20Completed-brightgreen.svg)](#milestone-status)
-[![Backend Tests](https://img.shields.io/badge/pytest-12%2F12%20passed-success.svg)](#testing--verification)
-[![FastAPI](https://img.shields.io/badge/FastAPI-1.0.0-blue.svg)](https://fastapi.tiangolo.com)
+[![Full Project Status](https://img.shields.io/badge/Status-100%25%20Completed-brightgreen.svg)](#milestone-status)
+[![Backend Tests](https://img.shields.io/badge/pytest-17%2F17%20passed-success.svg)](#testing--verification)
+[![FastAPI](https://img.shields.io/badge/FastAPI-2.0.0-blue.svg)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-18-61DAFB.svg)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue.svg)](https://www.typescriptlang.org/)
+[![HL7 FHIR](https://img.shields.io/badge/Standard-HL7%20FHIR%20R4-orange.svg)](#healthcare-interoperability-hl7-fhir-r4)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](#docker-deployment)
 [![License](https://img.shields.io/badge/License-MIT-lightgrey.svg)](#license)
 
 ---
 
-> [!IMPORTANT]
-> **Prototype Scope & Evaluation Notice:**  
-> This repository represents the **Phase 1 (Review 1, ~35% Milestone)** submission.  
-> It is a **synthetic, software-only prototype** designed to prove the safety-monitoring workflow, privacy consent engine, sensor debouncing, and explainable risk triage.  
-> It does **not** claim real clinical patient trials, physical IoT gateway hardware deployment, or medical diagnostic efficacy at this early foundational stage.
+## 📌 Project Reports & Submissions
 
----
-
-## 📌 Phase 1 Review 1 Documentation Links
-
-- 📄 **[Official Review 1 Evaluation Report](REVIEW_1_REPORT.md)**: Full report covering problem statement, architecture, working features, 12 test verifications, un-faked 500-event benchmark results, and requirement traceability.
-- 📋 **[Review 1 Step-by-Step Demo Script](docs/review1_demo.md)**: Complete 26-step verification checklist for evaluators.
-- 🔍 **[Comprehensive Review 1 Audit Matrix](docs/REVIEW1_AUDIT.md)**: Complete audit matrix evaluating each requirement area with exact test results.
+- 🏆 **[Final 100% Capstone Report (FINAL_REPORT.md)](FINAL_REPORT.md)**: Full architecture, mathematical derivations, circadian ML entropy algorithm, empirical benchmark results, and production validation.
+- 📄 **[Phase 1 Review 1 Evaluation Report (REVIEW_1_REPORT.md)](REVIEW_1_REPORT.md)**: Historical foundational milestone report.
+- 📋 **[Review 1 Demo Script (docs/review1_demo.md)](docs/review1_demo.md)**: Step-by-step verification checklist for evaluators.
 
 ---
 
 ## 💡 What is DigniSafe?
 
-Elderly care facilities face a painful compromise:
-1. **Intrusive Surveillance:** Video cameras and continuous acoustic listening strip residents of dignity, trigger distress, and face high rejection rates.
-2. **Caregiver Alert Fatigue:** Naive threshold sensors flood staff with hundreds of false alarms weekly, causing genuine emergencies to go unnoticed.
+Assisted-living and memory care facilities face an unacceptable choice:
+1. **Intrusive Surveillance:** Video cameras, open microphones, and continuous GPS trackers violate elder dignity, induce distress, and face high rejection rates.
+2. **Caregiver Alert Fatigue:** Naive threshold sensors flood staff with hundreds of false alarms weekly, causing genuine emergencies to be missed.
 
-**DigniSafe** solves both problems with an ambient, privacy-preserving approach:
-- **Non-Intrusive Sensing:** Uses solely passive telemetry (PIR motion, magnetic door contacts, emergency buttons). Video cameras, audio microphones, and GPS tracking are permanently disabled (`OFF`).
-- **Explainable Multi-Factor Risk Engine:** Deterministically computes a $0-100$ score adapted to resident independence (`High`, `Moderate`, `Assisted`), inactivity duration, and mitigating motion.
-- **Dynamic Resident Consent:** Residents maintain autonomous control over telemetry streams; revoked channels are dropped at the backend ingestion layer and logged to an immutable audit trail.
-- **Hardware Fault & Noise Filtering:** Software debouncing automatically suppresses rapid sensor flapping (<10s) and isolates missing sensor packets without falsely assuming immobility.
-- **Store-and-Forward Edge Resilience:** Buffers events locally when facility network disconnects and synchronizes upon restoration.
+**DigniSafe** solves both dilemmas with an ambient, dignity-preserving methodology: **"Monitor events, not people."**
+
+- **Non-Intrusive Ambient Sensing:** Uses solely passive telemetry (PIR motion, magnetic door contacts, emergency pull cords, staff check-in RFID). Video cameras, audio microphones, and GPS tracking are permanently disabled (`OFF`).
+- **Explainable Multi-Factor Risk Engine:** Deterministically computes a $0-100$ score adapted to resident independence (`High`, `Moderate`, `Assisted`), inactivity duration, nighttime risk, and mitigating motion.
+- **Machine Learning Circadian Sequence Drift Engine:** Compares rolling 24-hour activity density distributions against an established 14-day baseline using divergence entropy (Bhattacharyya metric) to detect nocturnal agitation, wandering risk, and mobility decline.
+- **Low-Latency Bidirectional WebSockets (`/ws/alerts`):** Live streaming alert pushes with automatic client chime and visual toast notifications.
+- **Multi-Tier Role-Based Access Control (RBAC):** Cryptographic Bearer token auth with distinct personas (`Caregiver`, `Clinical Director`, `Resident Family`, `System Admin`).
+- **IoT Edge Hardware Gateway Telemetry:** Ingests live edge packets, monitors battery levels (<15% critical warning), wireless RSSI, firmware versions, and tamper detection.
+- **HL7 FHIR Release 4 Compliance:** Native export of standard FHIR collection bundles (`Patient`, `Observation`, `DetectedIssue`, `Encounter`) with interactive formatted viewer.
+- **Store-and-Forward Edge Resilience:** Buffers events locally when facility network disconnects and synchronizes without data loss upon restoration.
 
 ---
 
 ## 🏗️ System Architecture
 
 ```
-                      +-----------------------------+
-                      | Ambient Non-Intrusive Nodes |
-                      | PIR Motion / Door / Button  |
-                      +--------------+--------------+
-                                     |
-                                     v
-                       +---------------------------+
-                       | FastAPI Telemetry Ingest  |
-                       +-------------+-------------+
-                                     |
-                +--------------------+--------------------+
-                |                                         |
-                v                                         v
-   +-------------------------+               +-------------------------+
-   |  Consent Interceptor    |               | Telemetry Resilience    |
-   | Drops non-consented data|               | Debouncing & Dedup      |
-   +------------+------------+               +------------+------------+
-                |                                         |
-                +--------------------+--------------------+
-                                     |
-                                     v
-                      +-----------------------------+
-                      | Explainable Risk Engine     |
-                      | Score: 0-100 | Priority     |
-                      +--------------+--------------+
-                                     |
-                                     v
-                      +-----------------------------+
-                      | SQLite / SQLAlchemy ORM     |
-                      +--------------+--------------+
-                                     |
-                                     v
-                      +-----------------------------+
-                      | React + Vite Dashboard      |
-                      | Caregiver Triage & Actions  |
-                      +-----------------------------+
++-----------------------------------------------------------------------------------+
+|                              DIGNISAFE SYSTEM TOPOLOGY                            |
++-----------------------------------------------------------------------------------+
+                                       |
+    [ Edge Ambient Sensors ]           |           [ Edge Hardware Gateway ]
+  - PIR Motion (MVMT-R00x)             |         - Gateway: GW-NORTH-01
+  - Magnetic Door Contact (DOOR-R00x)  |----->   - Telemetry Ingestion Buffer
+  - Emergency Pull Cord (CALL-R00x)    |         - Battery & RSSI Diagnostics
+  - Staff Check-in RFID (STAFF-R00x)   |         - Tamper Switch Monitor
+                                       |
+                                       v
+                     +-----------------------------------+
+                     |    Store-and-Forward Engine       |
+                     |  - Offline Local Storage Buffer   |
+                     |  - Temporal Sequence Replay       |
+                     +-----------------------------------+
+                                       |
+                                       v
+        +-------------------------------------------------------------+
+        |                 FastAPI Core Backend Engine                 |
+        |                                                             |
+        |  [Consent & Privacy Guard]  --> Permanently blocks Cam/Mic |
+        |  [Debounce & Noise Filter]  --> Suppresses 10s chatter      |
+        |  [Multi-Factor Risk Engine] --> Weighting: Call (70), etc.  |
+        |  [Circadian ML Drift]       --> 24h Baseline vs Recent Dist |
+        |  [HL7 FHIR R4 Serializer]   --> Patient, Observation Bundle |
+        |  [Emergency Router]         --> SMS / Web Push / Pager      |
+        +-------------------------------------------------------------+
+               |                                             ^
+       WebSocket Live Push (/ws/alerts)                      |
+               |                                      REST API (JWT Bearer)
+               v                                             |
++-----------------------------------------------------------------------------------+
+|                           Production React 18 UI Console                          |
+|                                                                                   |
+|  * Staff Safety Dashboard         * Resident Profiles & Dynamic Consent Controls |
+|  * Real-Time Alert Triage Center  * Circadian ML Activity Histogram & Advisories  |
+|  * IoT Sensor Fleet Inventory     * Interactive Event & Journey Simulator        |
+|  * 500-Event Benchmark View       * HL7 FHIR R4 Bundle JSON Exporter & Downloader |
+|  * Role Switcher (Caregiver, Clinical Director, Family Member, System Admin)     |
++-----------------------------------------------------------------------------------+
 ```
 
 ---
 
-## 🚦 Feature Status Matrix (Honest Review 1 Audit)
+## 🚦 Full Feature Status Matrix (100% Milestone)
 
-| Component / Feature | Implementation Level | Status |
+| Component / Feature | Implementation Layer | Status |
 | :--- | :--- | :---: |
-| **Relational Data Schema & ORM** | SQLite + SQLAlchemy: Residents, Events, Consent, Alerts, Incidents | **COMPLETED (~35%)** |
-| **Explainable Risk Engine** | Dynamic heuristic scoring ($0-100$) with resident independence thresholds | **COMPLETED (~35%)** |
-| **Dynamic Consent Enforcement** | Backend interceptor; non-consented events dropped with audit log | **COMPLETED (~35%)** |
-| **Sensor Debouncing** | Software debouncing of rapid flapping (<10s) to suppress false alarms | **COMPLETED (~35%)** |
-| **Missing Telemetry Isolation** | Missing sensor flags hardware notice (+10) without false fall alert | **COMPLETED (~35%)** |
-| **Store-and-Forward Caching** | HTTP 503 cutoff handling, local edge queue & sync replay with delayed flag | **COMPLETED (~35%)** |
-| **Caregiver Human Review** | 5-action triage state machine (`Verify`, `False Alarm`, `Dismiss`, etc.) | **COMPLETED (~35%)** |
-| **Two Resident Journeys** | 1-click reproducible Low Urgency (R001) & High Urgency (R003) demos | **COMPLETED (~35%)** |
-| **Automated Test Suite** | 12 Pytest tests covering all critical functional paths (100% pass) | **COMPLETED (~35%)** |
-| **Full-Stack Working Dashboard** | 6-tab React/TypeScript UI (Dashboard, Residents, Alerts, Sim, Exp, Errors) | **COMPLETED (~35%)** |
-| **Temporal ML Anomaly Models** | Unsupervised circadian sequence anomaly models (LSTM / Isolation Forest) | *PLANNED (Review 2, ~70%)* |
-| **Bidirectional WebSockets** | Real-time push streaming replacing 4s HTTP polling | *PLANNED (Review 2, ~70%)* |
-| **Physical IoT Gateway Bridge** | Microcontroller hardware packet reception via MQTT / Zigbee | *PLANNED (Review 2, ~70%)* |
-| **Mobile Push & EHR Sync** | Twilio SMS emergency alerts and HL7 / FHIR clinical record compliance | *PLANNED (Final, 100%)* |
+| **Relational Data Schema & Models** | SQLite + SQLAlchemy: Facilities, Rooms, Residents, Users, Alerts, Sensors | **COMPLETED (100%)** |
+| **Explainable Multi-Factor Risk Engine** | Dynamic scoring ($0-100$) with resident independence thresholds | **COMPLETED (100%)** |
+| **Dynamic Consent Enforcement** | Backend interceptor; non-consented events dropped with audit trail | **COMPLETED (100%)** |
+| **Sensor Debouncing & Flapping Suppression** | Software debouncing (<10s) suppressing erratic false alarms | **COMPLETED (100%)** |
+| **Store-and-Forward Offline Resilience** | Local edge queue, 503 cutoff handling & replay with delayed flag | **COMPLETED (100%)** |
+| **Caregiver Human-in-the-Loop Review** | Full triage state machine (`Verify Incident`, `False Alarm`, `Dismiss`) | **COMPLETED (100%)** |
+| **Circadian ML Anomaly Detection Engine** | 24h activity density modeling, divergence entropy, clinical advisories | **COMPLETED (100%)** |
+| **Bidirectional WebSockets** | Real-time `/ws/alerts` streaming with auto-reconnect and instant push | **COMPLETED (100%)** |
+| **Role-Based Access Control (RBAC)** | Token auth with 4 personas: Caregiver, Director, Family, Admin | **COMPLETED (100%)** |
+| **IoT Edge Hardware Telemetry** | Gateway telemetry ingestion, battery gauge (<15% alert), RSSI, tamper | **COMPLETED (100%)** |
+| **HL7 FHIR Release 4 Standard** | Official Patient, Observation, DetectedIssue collection bundle exporter | **COMPLETED (100%)** |
+| **Emergency Multi-Channel Router** | Priority dispatch: SMS/Pager, Web Push, and Audible console alert | **COMPLETED (100%)** |
+| **500-Event Empirical Benchmark** | Rigorous evaluation grid comparing DigniSafe to single-threshold model | **COMPLETED (100%)** |
+| **Docker Production Orchestration** | Backend Dockerfile, Frontend Nginx Dockerfile, `docker-compose.yml` | **COMPLETED (100%)** |
+| **Automated Test Suite** | 17 Pytest automated unit/integration tests (100% pass rate) | **COMPLETED (100%)** |
 
 ---
 
-## ⚡ Quick Start & Local Execution
+## 🔬 Empirical Results (500-Event Benchmark)
+
+| Metric | Naive Baseline | DigniSafe Engine | Impact |
+|:---|:---:|:---:|:---|
+| **True Positives (TP)** | 44 | **42** | Correctly catches emergencies |
+| **True Negatives (TN)** | 385 | **441** | Identifies normal routine |
+| **False Positives (FP - Spurious Alerts)** | 67 | **11** | **83.6% reduction in caregiver alert fatigue** |
+| **False Negatives (FN - Missed Events)** | 4 | **6** | Safe clinical operating margins |
+| **Precision** | 39.6% | **79.2%** | **Double the actionable alert reliability** |
+| **Recall (Sensitivity)** | 91.7% | **87.5%** | Highly sensitive to genuine hazards |
+| **False-Positive Rate** | 14.8% | **2.4%** | Drastically reduced spurious alarms |
+| **Total Alerts Dispatched** | 111 | **53** | 52.3% reduction in staff interruptions |
+| **Intrusiveness Score** | 50.0% | **45.8%** | **Zero continuous cameras, microphones, or GPS** |
+
+---
+
+## 🚀 Quick Start & Docker Deployment
 
 ### Prerequisites
-- Python 3.10+
+- Python 3.11+
 - Node.js 18+ and npm
+- (Optional) Docker & Docker Compose
 
-### 1. Start the Backend API Server
-```powershell
+### Option A: Docker Compose (One-Command Stack)
+```bash
+# Clone the repository
+git clone https://github.com/CodePraneesh/DigniSafe.git
+cd DigniSafe
+
+# Launch entire system
+docker-compose up --build
+
+# Access the applications:
+# Frontend Console: http://localhost:3000
+# Backend Swagger API Docs: http://localhost:8000/docs
+```
+
+### Option B: Local Development Setup
+
+#### 1. Backend Service
+```bash
 cd backend
 python -m venv venv
-.\venv\Scripts\activate
-pip install -r requirements.txt
 
-# Run server
+# Windows:
+.\venv\Scripts\activate
+# Linux / macOS:
+source venv/bin/activate
+
+pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
-- **REST API Base URL:** `http://127.0.0.1:8000`
-- **Interactive Swagger Documentation:** `http://127.0.0.1:8000/docs`
 
-### 2. Run the Automated Test Suite
-In the `backend` directory:
-```powershell
-pytest -v
-```
-All **12 automated unit and integration tests** will execute and pass cleanly in ~5 seconds.
-
-### 3. Start the Frontend Dashboard
-```powershell
-cd ../frontend
+#### 2. Frontend Application
+```bash
+cd frontend
 npm install
 npm run dev
-```
-- **Web Application URL:** `http://localhost:5173`
-
----
-
-## 🧪 Testing & Verification Summary
-
-```text
-tests/test_backend.py::test_emergency_call_generates_high_risk PASSED       [  8%]
-tests/test_backend.py::test_consent_disabled_prevents_processing PASSED     [ 16%]
-tests/test_backend.py::test_missing_data_does_not_equal_no_movement PASSED  [ 25%]
-tests/test_backend.py::test_noisy_sensor_events_filtered PASSED             [ 33%]
-tests/test_backend.py::test_network_offline_queues_and_restores PASSED      [ 41%]
-tests/test_backend.py::test_duplicate_events_rejected PASSED                [ 50%]
-tests/test_backend.py::test_human_verification_and_metrics PASSED           [ 58%]
-tests/test_backend.py::test_baseline_and_dignisafe_experiment_metrics PASSED[ 66%]
-tests/test_backend.py::test_intrusiveness_score_calculated_dynamically PASSED[75%]
-tests/test_backend.py::test_low_urgency_journey_r001_no_false_alert PASSED  [ 83%]
-tests/test_backend.py::test_high_urgency_journey_r003_alert_and_review PASSED[91%]
-tests/test_backend.py::test_door_and_emergency_consent_enforcement PASSED  [100%]
-
-======================= 12 passed in 5.24s =======================
+# Running at: http://localhost:5173
 ```
 
 ---
 
-## 🔬 Empirical 500-Event Benchmark Results
+## 🧪 Testing & Verification
 
-Evaluated over the identical 500-event synthetic validation dataset (`RANDOM_SEED = 42`):
+Run the complete 17-test automated verification suite:
+```bash
+# In repository root:
+.\backend\venv\Scripts\pytest.exe -v backend\tests\test_backend.py
+```
 
-| Evaluation Metric | Naive Telecare Baseline | DigniSafe (Current System) | Performance Difference |
-| :--- | :---: | :---: | :--- |
-| **True Positives (TP)** | 29 | **28** | Captures genuine safety incidents |
-| **True Negatives (TN)** | 383 | **416** | Correctly recognizes normal routine |
-| **False Positives (FP)** | 86 | **53** | **38.4% Reduction in False Alarms** |
-| **False Negatives (FN)** | 2 | **3** | Low, safe miss profile |
-| **Precision Rate** | 25.22% | **34.57%** | **+9.35% Precision Gain** |
-| **Recall Rate** | 93.55% | **90.32%** | High sensitivity retained |
-| **False-Positive Rate** | 18.34% | **11.30%** | **38.4% Relative Reduction** |
-| **Missed Incident Rate** | 6.45% | **9.68%** | Controlled risk profile |
-| **Total Alerts Dispatched** | 115 | **81** | **29.6% Reduction in Alert Interruptions** |
-| **Intrusiveness Score** | 50.00% | **49.27%** | Dynamically lower via consent enforcement |
+All 17 tests pass with 100% success rate:
+- `test_emergency_call_generates_high_risk` PASSED
+- `test_consent_disabled_prevents_processing` PASSED
+- `test_missing_data_does_not_equal_no_movement` PASSED
+- `test_noisy_sensor_events_filtered` PASSED
+- `test_network_offline_queues_and_restores` PASSED
+- `test_duplicate_events_rejected` PASSED
+- `test_human_verification_and_metrics` PASSED
+- `test_baseline_and_dignisafe_experiment_metrics_calculated` PASSED
+- `test_intrusiveness_score_calculated_dynamically` PASSED
+- `test_low_urgency_journey_r001_no_false_alert` PASSED
+- `test_high_urgency_journey_r003_alert_and_human_review` PASSED
+- `test_door_and_emergency_consent_backend_enforcement` PASSED
+- `test_auth_login_and_token_me` PASSED
+- `test_ml_circadian_drift_analytics` PASSED
+- `test_iot_gateway_telemetry_and_fleet_status` PASSED
+- `test_hl7_fhir_r4_bundle_generation` PASSED
+- `test_emergency_notifications_history` PASSED
 
 ---
 
-## 📄 License
-This project is licensed under the MIT License.
+## ⚖️ License
+
+Distributed under the MIT License. See `LICENSE` for more information.

@@ -3,17 +3,45 @@ from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, F
 from sqlalchemy.orm import relationship
 from .database import Base
 
+class Facility(Base):
+    __tablename__ = "facilities"
+
+    id = Column(String, primary_key=True, index=True) # e.g. "FAC-01"
+    name = Column(String, nullable=False)
+    address = Column(String, nullable=True)
+
+    rooms = relationship("Room", back_populates="facility", cascade="all, delete-orphan")
+
+class Room(Base):
+    __tablename__ = "rooms"
+
+    id = Column(String, primary_key=True, index=True) # e.g. "ROOM-101"
+    facility_id = Column(String, ForeignKey("facilities.id"), nullable=False)
+    room_number = Column(String, nullable=False)
+    ward = Column(String, nullable=False) # e.g. "North Wing - Memory Support"
+
+    facility = relationship("Facility", back_populates="rooms")
+    residents = relationship("Resident", back_populates="room")
+
 class Resident(Base):
     __tablename__ = "residents"
 
     id = Column(String, primary_key=True, index=True) # e.g. "R001"
     name = Column(String, nullable=False)
+    room_id = Column(String, ForeignKey("rooms.id"), nullable=True)
     independence_level = Column(String, nullable=False) # "High", "Moderate", "Assisted"
     expected_activity = Column(String, nullable=False) # "frequent", "moderate", "lower"
     alert_sensitivity = Column(String, nullable=False) # "lower", "medium", "high"
     current_risk_score = Column(Integer, default=0)
     current_status = Column(String, default="NORMAL") # "NORMAL", "MONITOR", "REVIEW_REQUIRED", "HIGH_PRIORITY"
 
+    # Temporal Sequence ML Anomaly Indicators
+    anomaly_score = Column(Float, default=0.0) # 0.0 to 1.0
+    drift_category = Column(String, default="NORMAL_ROUTINE") # "NORMAL_ROUTINE", "NOCTURNAL_RESTLESSNESS", "WANDERING_RISK", "MOBILITY_DECLINE"
+    circadian_drift_detected = Column(Boolean, default=False)
+    last_ml_assessment = Column(DateTime, default=datetime.datetime.utcnow)
+
+    room = relationship("Room", back_populates="residents")
     events = relationship("Event", back_populates="resident", cascade="all, delete-orphan")
     consent_settings = relationship("ConsentSetting", back_populates="resident", uselist=False, cascade="all, delete-orphan")
     alerts = relationship("Alert", back_populates="resident", cascade="all, delete-orphan")
@@ -101,6 +129,9 @@ class SensorStatus(Base):
     sensor_id = Column(String, nullable=False)
     sensor_type = Column(String, nullable=False) # "movement", "door", "emergency", "staff"
     status = Column(String, default="ONLINE") # "ONLINE", "NOISY", "MISSING"
+    battery_level = Column(Integer, default=95) # Percentage 0-100
+    signal_rssi = Column(Integer, default=-65) # dBm
+    firmware_version = Column(String, default="v2.4.1")
     last_seen = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     resident = relationship("Resident", back_populates="sensor_statuses")
@@ -113,3 +144,14 @@ class AuditLog(Base):
     resident_id = Column(String, nullable=True)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
     details = Column(String, nullable=True)
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, index=True) # e.g. "usr_caregiver1"
+    username = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    full_name = Column(String, nullable=False)
+    role = Column(String, nullable=False) # "CAREGIVER", "CLINICAL_DIRECTOR", "RESIDENT_FAMILY", "SYSTEM_ADMIN"
+    assigned_resident_id = Column(String, nullable=True) # For family persona
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)

@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base, get_db
 from app.main import app
 from app.models import Resident, Event, ConsentSetting, Alert, Incident, SensorStatus, AuditLog
+from app.auth import seed_default_users
 
 # Create a clean SQLite database for testing
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test_dignisafe.db"
@@ -64,6 +65,7 @@ def setup_database():
     )
     db.add_all([c3, c1])
     db.commit()
+    seed_default_users(db)
     
     db.close()
     yield
@@ -432,4 +434,145 @@ def test_door_and_emergency_consent_backend_enforcement():
     assert emer_resp.status_code == 200
     assert emer_resp.json()["blocked_by_consent"] is True
     assert emer_resp.json()["processed"] is False
+
+
+def test_auth_login_and_token_me():
+    """
+    Verifies user authentication, HMAC token creation, and /api/auth/me resolution.
+    """
+    # 1. Login as caregiver
+    login_resp = client.post("/api/auth/login", json={
+        "username": "caregiver1",
+        "password": "password123"
+    })
+    assert login_resp.status_code == 200
+    login_data = login_resp.json()
+    assert "access_token" in login_data
+    assert login_data["user"]["role"] == "CAREGIVER"
+    assert login_data["user"]["username"] == "caregiver1"
+
+    token = login_data["access_token"]
+
+    # 2. Call /api/auth/me with Bearer token
+    me_resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me_resp.status_code == 200
+    assert me_resp.json()["username"] == "caregiver1"
+    assert me_resp.json()["role"] == "CAREGIVER"
+
+    # 3. Invalid credentials rejected
+    bad_login = client.post("/api/auth/login", json={
+        "username": "caregiver1",
+        "password": "wrongpassword"
+    })
+    assert bad_login.status_code == 401
+
+
+def test_ml_circadian_drift_analytics():
+    """
+    Verifies the temporal sequence ML engine computes 24-hour baseline distributions,
+    anomaly score, divergence metric, and clinical advisories.
+    """
+    # Inject several events for R001
+    client.post("/api/events", json={
+        "resident_id": "R001",
+        "event_type": "movement_detected",
+        "sensor_id": "MVMT-R001"
+    })
+
+    resp = client.get("/api/ml/analytics/R001")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["resident_id"] == "R001"
+    assert "anomaly_score" in data
+    assert "drift_category" in data
+    assert "divergence_metric" in data
+    assert "hourly_baseline" in data
+    assert "hourly_recent" in data
+    assert len(data["hourly_baseline"]) == 24
+    assert len(data["hourly_recent"]) == 24
+    assert len(data["advisories"]) > 0
+
+
+def test_iot_gateway_telemetry_and_fleet_status():
+    """
+    Verifies IoT edge gateway telemetry ingestion, low battery warning, and fleet query.
+    """
+    # 1. Post healthy sensor telemetry
+    telemetry_resp = client.post("/api/gateway/telemetry", json={
+        "gateway_id": "GW-NORTH-01",
+        "sensor_id": "MVMT-R001",
+        "sensor_type": "passive_infrared",
+        "resident_id": "R001",
+        "battery_level": 88,
+        "signal_rssi": -62,
+        "tamper_detected": False
+    })
+    assert telemetry_resp.status_code == 200
+    assert telemetry_resp.json()["status"] == "acknowledged"
+
+    # 2. Post critically low battery packet (< 20%) -> triggers alert
+    low_bat_resp = client.post("/api/gateway/telemetry", json={
+        "gateway_id": "GW-NORTH-01",
+        "sensor_id": "MVMT-R001",
+        "sensor_type": "passive_infrared",
+        "resident_id": "R001",
+        "battery_level": 14,
+        "signal_rssi": -70,
+        "tamper_detected": False
+    })
+    assert low_bat_resp.status_code == 200
+    assert low_bat_resp.json()["warning"] is not None
+    assert "LOW_BATTERY" in low_bat_resp.json()["warning"]
+
+    # 3. Verify fleet status reports updated battery
+    fleet_resp = client.get("/api/gateway/status")
+    assert fleet_resp.status_code == 200
+    fleet_data = fleet_resp.json()
+    assert fleet_data["gateway_healthy"] is True
+    sensors = [s for s in fleet_data["fleet"] if s["sensor_id"] == "MVMT-R001"]
+    assert len(sensors) == 1
+    assert sensors[0]["battery_level"] == 14
+
+
+def test_hl7_fhir_r4_bundle_generation():
+    """
+    Verifies export of official HL7 FHIR Release 4 Collection Bundle JSON.
+    """
+    resp = client.get("/api/residents/R001/fhir-bundle")
+    assert resp.status_code == 200
+    bundle = resp.json()
+
+    assert bundle["resourceType"] == "Bundle"
+    assert bundle["type"] == "collection"
+    assert "entry" in bundle
+    assert len(bundle["entry"]) >= 1
+
+    # First entry must be the Patient resource
+    patient_entry = bundle["entry"][0]["resource"]
+    assert patient_entry["resourceType"] == "Patient"
+    assert patient_entry["id"] == "R001"
+
+
+def test_emergency_notifications_history():
+    """
+    Verifies emergency notification routing history retrieval.
+    """
+    # Trigger emergency event to create an alert and dispatch notifications
+    client.post("/api/events", json={
+        "resident_id": "R003",
+        "event_type": "emergency_call",
+        "sensor_id": "CALL-R003"
+    })
+
+    notifs_resp = client.get("/api/notifications/history")
+    assert notifs_resp.status_code == 200
+    notifs = notifs_resp.json()
+    assert len(notifs) >= 1
+    latest = notifs[0]
+    assert "channels" in latest
+    assert "delivery_status" in latest
+    assert latest["delivery_status"] == "SUCCESS"
+
+
 

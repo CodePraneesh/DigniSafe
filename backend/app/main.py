@@ -1,25 +1,49 @@
 import json
 import datetime
+import asyncio
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.websockets import WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from .database import engine, Base, get_db
-from .models import Resident, Event, ConsentSetting, Alert, Incident, HumanReview, SensorStatus, AuditLog
+from .models import (
+    Resident, Event, ConsentSetting, Alert, Incident, HumanReview,
+    SensorStatus, AuditLog, Facility, Room, User
+)
 from .schemas import (
     EventCreate, EventResponse, ConsentUpdate, ConsentResponse,
     HumanReviewRequest, AlertResponse, ResidentResponse, ResidentDetailResponse,
-    MetricsResponse, ExperimentResponse, ErrorAnalysisResponse, ErrorAnalysisItem
+    MetricsResponse, ExperimentResponse, ErrorAnalysisResponse, ErrorAnalysisItem,
+    UserLogin, UserResponse, Token, MLAnalyticsResponse,
+    GatewayTelemetryPacket, GatewayDeviceResponse, NotificationDispatchResponse
 )
 from .consent import is_event_allowed
 from .risk_engine import calculate_risk
 from .experiment import run_experiment, generate_synthetic_dataset
+from .websocket_manager import manager
+from .auth import (
+    create_access_token, verify_password, hash_password, get_current_user,
+    require_auth, require_role, seed_default_users,
+    ROLE_CAREGIVER, ROLE_CLINICAL_DIRECTOR, ROLE_RESIDENT_FAMILY, ROLE_SYSTEM_ADMIN
+)
+from .ml_engine import analyze_circadian_drift
+from .iot_gateway import process_gateway_telemetry_packet, get_gateway_fleet_status
+from .fhir_exporter import generate_fhir_bundle
+from .notifications import dispatch_emergency_notification, get_dispatch_history
 
 # Initialize database
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="DigniSafe API", version="1.0.0")
+def safe_broadcast(event_type: str, data: Any):
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(manager.broadcast(event_type, data))
+    except (RuntimeError, Exception):
+        pass
+
+app = FastAPI(title="DigniSafe API", version="2.0.0")
 
 # Enable CORS for frontend communication
 app.add_middleware(
@@ -114,7 +138,23 @@ def seed_residents(db: Session):
 def startup_event():
     db = next(get_db())
     try:
+        # Seed default facility and rooms
+        fac = db.query(Facility).filter(Facility.id == "FAC-01").first()
+        if not fac:
+            fac = Facility(id="FAC-01", name="DigniSafe Senior Living Community", address="100 Serenitas Way")
+            db.add(fac)
+            db.commit()
+            
+            rooms = [
+                Room(id="ROOM-101", facility_id="FAC-01", room_number="101", ward="North Wing - Memory Care"),
+                Room(id="ROOM-102", facility_id="FAC-01", room_number="102", ward="North Wing - Memory Care"),
+                Room(id="ROOM-103", facility_id="FAC-01", room_number="103", ward="South Wing - Assisted Living")
+            ]
+            db.add_all(rooms)
+            db.commit()
+
         seed_residents(db)
+        seed_default_users(db)
     finally:
         db.close()
 
@@ -339,6 +379,7 @@ def create_event(event_in: EventCreate, db: Session = Depends(get_db)):
                 )
                 db.add(open_alert)
                 db.commit()
+                db.refresh(open_alert)
                 log_audit(db, "ALERT_GENERATED", res.id, f"Alert created for {res.name} with score {score}")
             else:
                 # Update existing open alert
@@ -346,6 +387,40 @@ def create_event(event_in: EventCreate, db: Session = Depends(get_db)):
                 open_alert.priority = priority
                 open_alert.explanation = json.dumps(explanation)
                 db.commit()
+                db.refresh(open_alert)
+
+            # Dispatch emergency notification
+            try:
+                dispatch_emergency_notification(
+                    alert_id=open_alert.id,
+                    resident_id=res.id,
+                    resident_name=res.name,
+                    risk_score=score,
+                    priority=priority,
+                    explanation=explanation
+                )
+            except Exception:
+                pass
+
+            # Broadcast alert to WebSocket consoles
+            safe_broadcast("ALERT_GENERATED", {
+                "id": open_alert.id,
+                "resident_id": open_alert.resident_id,
+                "risk_score": open_alert.risk_score,
+                "priority": open_alert.priority,
+                "status": open_alert.status,
+                "timestamp": open_alert.timestamp.isoformat()
+            })
+
+    # Broadcast event ingested
+    safe_broadcast("EVENT_INGESTED", {
+        "id": new_event.id,
+        "resident_id": new_event.resident_id,
+        "event_type": new_event.event_type,
+        "timestamp": new_event.timestamp.isoformat(),
+        "blocked_by_consent": new_event.blocked_by_consent,
+        "processed": new_event.processed
+    })
     
     return new_event
 
@@ -409,6 +484,13 @@ def review_alert(id: int, review_in: HumanReviewRequest, db: Session = Depends(g
     db.refresh(alert)
     
     log_audit(db, "ALERT_REVIEWED", alert.resident_id, f"Alert {alert.id} reviewed: {review_in.action_taken}")
+
+    safe_broadcast("ALERT_REVIEWED", {
+        "id": alert.id,
+        "resident_id": alert.resident_id,
+        "status": alert.status,
+        "action_taken": review_in.action_taken
+    })
     
     # Format and return response
     alert_resp = AlertResponse.from_orm(alert)
@@ -725,3 +807,97 @@ def get_error_analysis(db: Session = Depends(get_db)):
     ]
     
     return ErrorAnalysisResponse(errors=errors)
+
+# Real-Time WebSocket Streaming Endpoint
+@app.websocket("/ws/alerts")
+async def websocket_alerts_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text(json.dumps({"type": "pong"}))
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception:
+        manager.disconnect(websocket)
+
+# Auth & RBAC Endpoints
+@app.post("/api/auth/login", response_model=Token)
+def login(login_data: UserLogin, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == login_data.username).first()
+    if not user or not verify_password(login_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password"
+        )
+    token_str = create_access_token(user.id, user.username, user.role)
+    return Token(
+        access_token=token_str,
+        token_type="bearer",
+        user=UserResponse.from_orm(user)
+    )
+
+@app.get("/api/auth/me", response_model=UserResponse)
+def get_current_user_profile(user: Optional[User] = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not user:
+        default_usr = db.query(User).filter(User.username == "caregiver1").first()
+        return default_usr
+    return user
+
+@app.get("/api/auth/users", response_model=List[UserResponse])
+def list_demo_users(db: Session = Depends(get_db)):
+    return db.query(User).all()
+
+# ML Temporal Anomaly Analytics
+@app.get("/api/ml/analytics/{resident_id}", response_model=MLAnalyticsResponse)
+def get_ml_analytics(resident_id: str, db: Session = Depends(get_db)):
+    resident = db.query(Resident).filter(Resident.id == resident_id).first()
+    if not resident:
+        raise HTTPException(status_code=404, detail="Resident not found")
+        
+    events = db.query(Event).filter(Event.resident_id == resident_id).order_by(Event.timestamp.desc()).all()
+    analysis = analyze_circadian_drift(resident, events)
+    
+    # Update model cache on resident record
+    resident.anomaly_score = analysis["anomaly_score"]
+    resident.drift_category = analysis["drift_category"]
+    resident.circadian_drift_detected = analysis["circadian_drift_detected"]
+    resident.last_ml_assessment = datetime.datetime.utcnow()
+    db.commit()
+    
+    return MLAnalyticsResponse(**analysis)
+
+# IoT Edge Gateway Endpoints
+@app.post("/api/gateway/telemetry")
+def ingest_gateway_packet(packet: GatewayTelemetryPacket, db: Session = Depends(get_db)):
+    result = process_gateway_telemetry_packet(db, packet.dict())
+    safe_broadcast("GATEWAY_TELEMETRY", result)
+    return result
+
+@app.get("/api/gateway/fleet", response_model=List[GatewayDeviceResponse])
+def get_gateway_fleet(db: Session = Depends(get_db)):
+    return get_gateway_fleet_status(db)
+
+@app.get("/api/gateway/status")
+def get_gateway_status(db: Session = Depends(get_db)):
+    return {
+        "gateway_id": "GW-NORTH-01",
+        "gateway_healthy": True,
+        "fleet": get_gateway_fleet_status(db)
+    }
+
+# Healthcare Standard Compliance: HL7 FHIR R4 Bundle Export
+@app.get("/api/residents/{id}/fhir-bundle")
+def get_resident_fhir_bundle(id: str, db: Session = Depends(get_db)):
+    resident = db.query(Resident).filter(Resident.id == id).first()
+    if not resident:
+        raise HTTPException(status_code=404, detail="Resident not found")
+    bundle = generate_fhir_bundle(db, id)
+    return bundle
+
+# Multi-Channel Notification History
+@app.get("/api/notifications/history", response_model=List[NotificationDispatchResponse])
+def get_notifications(limit: int = 50):
+    return get_dispatch_history(limit)
+

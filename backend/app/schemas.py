@@ -112,6 +112,9 @@ class SensorStatusResponse(BaseModel):
     sensor_id: str
     sensor_type: str
     status: str
+    battery_level: int = 95
+    signal_rssi: int = -65
+    firmware_version: str = "v2.4.1"
     last_seen: datetime
 
     class Config:
@@ -121,11 +124,15 @@ class SensorStatusResponse(BaseModel):
 class ResidentResponse(BaseModel):
     id: str
     name: str
+    room_id: Optional[str] = None
     independence_level: str
     expected_activity: str
     alert_sensitivity: str
     current_risk_score: int
     current_status: str
+    anomaly_score: float = 0.0
+    drift_category: str = "NORMAL_ROUTINE"
+    circadian_drift_detected: bool = False
     consent_settings: Optional[ConsentResponse] = None
 
     class Config:
@@ -197,3 +204,68 @@ class ExperimentResponse(BaseModel):
     dignisafe: ExperimentMetrics
     intrusiveness_baseline: float
     intrusiveness_dignisafe: float
+
+# Auth & RBAC
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+class UserResponse(BaseModel):
+    id: str
+    username: str
+    full_name: str
+    role: str
+    assigned_resident_id: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+# ML Temporal Anomaly Analytics
+class MLAnalyticsResponse(BaseModel):
+    resident_id: str
+    anomaly_score: float
+    drift_category: str
+    circadian_drift_detected: bool
+    divergence_metric: float = 0.0
+    hourly_baseline: List[float]
+    hourly_recent: List[float]
+    nighttime_activity_ratio: float
+    advisories: List[str]
+
+# IoT Gateway Telemetry
+class GatewayTelemetryPacket(BaseModel):
+    sensor_id: str
+    resident_id: str
+    sensor_type: str = "movement"
+    battery_level: int = 95
+    signal_rssi: int = -65
+    firmware_version: str = "v2.4.1"
+    tamper_detected: bool = False
+
+class GatewayDeviceResponse(BaseModel):
+    sensor_id: str
+    sensor_type: str
+    resident_id: str
+    resident_name: str
+    status: str
+    battery_level: int
+    signal_rssi: int
+    firmware_version: str
+    last_seen: datetime
+
+# Emergency Notifications
+class NotificationDispatchResponse(BaseModel):
+    dispatch_id: int
+    alert_id: int
+    resident_id: str
+    recipient: str
+    channels: List[str]
+    message: str
+    timestamp: str
+    delivery_status: str
+

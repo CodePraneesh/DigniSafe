@@ -14,6 +14,8 @@ import {
   AuthUser, MLAnalytics, SensorStatusItem, NotificationLog,
   getQueuedEvents, initWebSocket, subscribeAlerts, subscribeWsStatus 
 } from './api';
+import { ErrorBoundary } from './components/ErrorBoundary';
+
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'residents' | 'alerts' | 'ml-analytics' | 'iot-fleet' | 'simulator' | 'experiment' | 'errors'>('dashboard');
@@ -585,8 +587,15 @@ export default function App() {
 
         {/* Content Viewer Grid */}
         <main className="flex-1 p-6 md:p-8 overflow-y-auto">
-          {/* TAB 1: Dashboard View */}
-          {activeTab === 'dashboard' && (
+          <ErrorBoundary
+            isolate
+            sectionName={`Module: ${activeTab.toUpperCase()}`}
+            fallbackTitle="Subsystem Fault Contained"
+            fallbackMessage="An unexpected rendering exception was caught in this section. Background ambient telemetry and emergency alerts remain active."
+          >
+            {/* TAB 1: Dashboard View */}
+            {activeTab === 'dashboard' && (
+
             <div className="space-y-6">
               <div className="flex flex-col gap-1">
                 <h2 className="text-2xl font-bold text-cyan-950">Staff Dashboard</h2>
@@ -1702,8 +1711,10 @@ export default function App() {
               </div>
             </div>
           )}
+          </ErrorBoundary>
         </main>
       </div>
+
 
       {/* HL7 FHIR R4 Bundle Modal */}
       {fhirModalData && (
